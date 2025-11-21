@@ -21,4 +21,26 @@ curl -X POST "http://localhost:8000/api/v1/devices/<device_id>/locations" \
 
        #fetch trajectory 
 
-curl "http://localhost:8000/api/v1/devices/<device_id>/trajectory?start=2025-11-21T00:00:00Z&end=2025-11-21T23:59:59Z" -H "Authorization: Bearer <token>"
+curl "http://localhost:8000/api/v1/devices/<device_id>/trajectory?start=2025-11-21T00:00:00Z&
+end=2025-11-21T23:59:59Z" -H "Authorization: Bearer <token>"
+
+
+
+
+
+
+Track lost or stolen phones with real-time location updates
+
+Store and query location history using a spatial database (PostGIS)
+
+Create geofences (alerts when a device enters/exits an area)
+
+Capture evidence (images, videos) remotely
+
+Perform remote actions on the device (ring, lock, limited “lost mode”)
+
+Provide a web dashboard for map visualization and analytics
+
+Provide a mobile app for the user device (React Native)
+
+Focus on a spatial database with PostGIS to show advanced queries 
