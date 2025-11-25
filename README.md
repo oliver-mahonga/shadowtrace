@@ -44,3 +44,71 @@ Provide a web dashboard for map visualization and analytics
 Provide a mobile app for the user device (React Native)
 
 Focus on a spatial database with PostGIS to show advanced queries 
+
+
+
+
+
+
+
+
+queries 
+#phones in 1 km      
+SELECT name
+FROM lost_items
+WHERE ST_DWithin(
+    last_seen,
+    ST_GeogFromText('POINT(36.8210 -1.2920)'),
+    1000
+);
+
+
+
+#nearest phone 
+SELECT name, ST_Distance(
+    last_seen,
+    ST_GeogFromText('POINT(36.8210 -1.2920)')
+) AS distance_meters
+FROM lost_items
+ORDER BY distance_meters
+LIMIT 1;
+
+
+
+#customer polygon 
+SELECT name
+FROM lost_items
+WHERE ST_Within(
+    last_seen,
+    ST_GeogFromText('POLYGON((36.819 -1.295, 36.829 -1.295, 36.829 -1.290, 36.819 -1.290, 36.819 -1.295))')
+);
+
+
+
+
+#distance btn 2 phones
+SELECT a.name AS phone1, b.name AS phone2, ST_Distance(a.last_seen, b.last_seen) AS distance_meters
+FROM lost_items a, lost_items b
+WHERE a.id <> b.id
+ORDER BY distance_meters
+LIMIT 5;
+
+
+
+
+#introduction
+A spatial database is a database optimized to store, query, and manage geographical or location-based data.
+Unlike regular databases, it can handle points, lines, polygons, and complex geometries, and allows queries like "find all points within a radius" or "find nearest objects".
+
+#where it can be used 
+
+
+GPS navigation apps (Google Maps, Waze)
+
+Delivery or ride-hailing apps (Uber, Bolt)
+
+Real estate apps (find nearby houses, plots, or stores)
+
+Environmental monitoring (tracking rivers, forests, deforestation areas)
+
+Public safety (fire stations, hospitals, or lost item tracking)
