@@ -1,6 +1,16 @@
 # backend/app/main.py
 from fastapi import FastAPI
-from app.api import v1
-app = FastAPI(title="ShadowTrace API")
+from .api import v1
+from .db import engine, Base
+import logging
 
-app.include_router(v1.router, prefix="/api/v1")
+logger = logging.getLogger("uvicorn.error")
+app = FastAPI(title="ShadowTrace API")
+app.include_router(v1.router)
+
+@app.on_event("startup")
+async def startup():
+    # create tables (development convenience)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("DB tables ensured")
