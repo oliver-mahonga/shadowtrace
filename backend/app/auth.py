@@ -13,7 +13,7 @@ from . import crud, models
 from .db import get_db
 
 PWD_CTX = CryptContext(schemes=["bcrypt"], deprecated="auto")
-SECRET_KEY = os.getenv("JWT_SECRET", "change_this_super_secret_for_shadowtrace") # Ensure to change this
+SECRET_KEY = os.getenv("JWT_SECRET", "change_this_super_secret_for_shadowtrace") 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_MINUTES", 60 * 24 * 7))
 

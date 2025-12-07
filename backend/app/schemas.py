@@ -89,3 +89,9 @@ class CommandStatusUpdate(BaseModel):
     command_id: uuid.UUID
     status: str = Field(..., description="e.g., 'EXECUTED', 'FAILED', 'ACKNOWLEDGED'")
     payload: Optional[dict] = {} # For results, like an S3 path to an image
+    
+# --- Geofence Input Schema ---
+class GeofenceIn(BaseModel):
+    name: str
+    # GeoJSON Polygon structure is complex, use dict for simplicity here
+    geojson: dict # Must be a GeoJSON Polygon Geometry or Feature
