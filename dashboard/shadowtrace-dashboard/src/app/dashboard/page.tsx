@@ -1,35 +1,58 @@
-"use client";
+// app/dashboard/page.tsx
+'use client';
 
-import { motion } from "framer-motion";
+import { useState } from 'react';
+import Header from '../../../components/Header';
+import DeviceSidebar from '../../../components/dashboard/DeviceSidebar';
+import MainMapView from '../../../components/dashboard/MainMapView';
+import CommandPanel from '../../../components/dashboard/CommandPanel';
+// import Header from '../../components/Header';
+// import DeviceSidebar from '../../components/dashboard/DeviceSidebar';
+// import MainMapView from '../../components/dashboard/MainMapView';
+// import CommandPanel from '../../components/dashboard/CommandPanel';
+// import { DeviceOut } from '@/types/schemas'; // Assuming you create this type file
 
-export default function DashboardHome() {
+// Define a simple type for the device data we'll use in the frontend
+// NOTE: Create a file at src/types/schemas.ts or similar, and add the structure below:
+// export interface DeviceOut {
+//     id: string; // uuid string
+//     unique_device_id: string;
+//     display_name: string | null;
+//     status: string | null; // e.g., 'online', 'offline'
+//     last_active: string | null; // datetime string
+// }
+
+
+export default function Dashboard() {
+  const [selectedDevice, setSelectedDevice] = useState<DeviceOut | null>(null);
+
   return (
-    <div>
-      <h1 className="text-3xl font-bold text-green-300 mb-6">
-        Dashboard Overview
-      </h1>
+    <div className="min-h-screen bg-gray-950 text-green-400 font-mono flex flex-col">
+      <Header />
+      
+      {/* Main Grid Layout */}
+      <main className="flex flex-1 pt-16 p-4 space-x-4">
+        
+        {/* LEFT COLUMN: Device List & Status */}
+        <DeviceSidebar 
+          selectedDevice={selectedDevice} 
+          onDeviceSelect={setSelectedDevice} 
+        />
 
-      {/* Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {[
-          { title: "Active Devices", value: "8" },
-          { title: "Alerts Today", value: "3" },
-          { title: "Live Feeds", value: "2" },
-        ].map((card, i) => (
-          <motion.div
-            key={i}
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.2 }}
-            className="p-6 border border-green-500/20 rounded-xl bg-black/40 backdrop-blur-lg shadow-lg"
-          >
-            <h2 className="text-xl font-semibold text-green-400">
-              {card.title}
-            </h2>
-            <p className="text-4xl mt-3 font-bold">{card.value}</p>
-          </motion.div>
-        ))}
-      </div>
+        {/* CENTER COLUMN: Map & Trajectory */}
+        <div className="flex-1 min-w-0">
+          <MainMapView selectedDevice={selectedDevice} />
+        </div>
+
+        {/* RIGHT COLUMN: Commands & Log */}
+        <CommandPanel selectedDevice={selectedDevice} />
+
+      </main>
+      
+      {/* Status Overlay/Footer (Optional) */}
+      <footer className="p-2 text-xs text-center border-t border-green-700/50">
+         SYSTEM STATUS: TRACE PROTOCOL ACTIVE // USER: AUTHENTICATED
+      </footer>
     </div>
   );
 }
