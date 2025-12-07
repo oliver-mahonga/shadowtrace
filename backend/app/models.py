@@ -10,7 +10,7 @@ class User(Base):
     __tablename__ = "users"
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("uuid_generate_v4()"))
     email = Column(String, unique=True, nullable=False)
-    username = Column(String, unique=True, nullable=False) # ADDED: Username field
+    username = Column(String, unique=True, nullable=False) 
     hashed_password = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
@@ -21,7 +21,6 @@ class Device(Base):
     __tablename__ = "devices"
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("uuid_generate_v4()"))
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"))
-    # UPDATED: Renamed from device_uuid to unique_device_id
     unique_device_id = Column(String, unique=True, nullable=False) 
     display_name = Column(String)
     public_key = Column(String)
@@ -73,6 +72,6 @@ class CommandLog(Base):
     __tablename__ = "events" 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("uuid_generate_v4()"))
     device_id = Column(UUID(as_uuid=True), ForeignKey("devices.id"))
-    type = Column(String, nullable=False) # The action (e.g., LOCK)
-    payload = Column(JSON, default={}) # Stores command params and status
+    type = Column(String, nullable=False) 
+    payload = Column(JSON, default={}) 
     occurred_at = Column(DateTime(timezone=True), server_default=func.now())

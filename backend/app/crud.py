@@ -62,7 +62,6 @@ async def add_location(session: AsyncSession, device_id: uuid.UUID, lat: float, 
     l = models.Location(
         device_id=device_id,
         recorded_at=recorded_at if recorded_at else datetime.utcnow(),
-        # PostGIS geometry construction using WKT format
         geom=f'POINT({lon} {lat})', 
         accuracy_m=accuracy,
         speed=speed
@@ -88,6 +87,78 @@ async def get_last_location(session: AsyncSession, device_id: uuid.UUID):
     if not r:
         return None
     return {"id": str(r.id), "lat": r.lat, "lon": r.lon, "accuracy": r.accuracy_m, "speed": r.speed, "recorded_at": r.recorded_at}
+
+# --- Location History and Trajectory Retrieval ---
+async def get_locations_in_range(session: AsyncSession, device_id: uuid.UUID, start: str | None = None, end: str | None = None):
+    """Retrieves all location points for a device in a given time range."""
+    sql = "SELECT id, ST_X(geom) as lon, ST_Y(geom) as lat, accuracy_m, speed, recorded_at FROM locations WHERE device_id = :device_id"
+    params = {"device_id": str(device_id)}
+    if start:
+        sql += " AND recorded_at >= :start"
+        params["start"] = start
+    if end:
+        sql += " AND recorded_at <= :end"
+        params["end"] = end
+    sql += " ORDER BY recorded_at ASC"
+    
+    q = await session.execute(text(sql), params)
+    rows = q.fetchall()
+    return [{
+        "id": str(r.id), 
+        "lat": r.lat, 
+        "lon": r.lon, 
+        "accuracy": r.accuracy_m, 
+        "speed": r.speed, 
+        "recorded_at": r.recorded_at
+    } for r in rows]
+
+async def get_trajectory_geojson(session: AsyncSession, device_id: uuid.UUID, start: str | None = None, end: str | None = None):
+    """Computes a GeoJSON LineString representing the device's path."""
+    sql = "SELECT ST_AsGeoJSON(ST_MakeLine(geom ORDER BY recorded_at)) as geojson FROM locations WHERE device_id = :device_id"
+    params = {"device_id": str(device_id)}
+    if start:
+        sql += " AND recorded_at >= :start"
+        params["start"] = start
+    if end:
+        sql += " AND recorded_at <= :end"
+        params["end"] = end
+        
+    q = await session.execute(text(sql), params)
+    row = q.first()
+    
+    if not row or not row.geojson:
+        # Return a valid empty GeoJSON FeatureCollection if no line is formed
+        return {"type": "FeatureCollection", "features": []}
+    
+    line_feature = {
+        "type": "Feature",
+        "geometry": json.loads(row.geojson),
+        "properties": {"device_id": str(device_id)}
+    }
+    return {"type": "FeatureCollection", "features": [line_feature]}
+
+
+# --- Geofence CRUD ---
+async def create_geofence(session: AsyncSession, owner_id: uuid.UUID, name: str, geojson_polygon: dict) -> uuid.UUID:
+    """Inserts a new geofence using a GeoJSON Polygon."""
+    stmt = text(
+        "INSERT INTO geofences (owner_id, name, geom) "
+        "VALUES (:owner_id, :name, ST_SetSRID(ST_GeomFromGeoJSON(:geojson), 4326)) RETURNING id"
+    )
+    res = await session.execute(stmt, {
+        "owner_id": str(owner_id), 
+        "name": name, 
+        "geojson": json.dumps(geojson_polygon)
+    })
+    new_id = res.scalar_one()
+    await session.commit()
+    return new_id
+
+async def list_geofences_by_user(session: AsyncSession, owner_id: uuid.UUID):
+    """Retrieves all geofences owned by the user."""
+    q = await session.execute(select(models.Geofence).where(models.Geofence.owner_id == owner_id))
+    return q.scalars().all()
+
 
 # --- Command/Action CRUD ---
 async def log_command(session: AsyncSession, device_id: uuid.UUID, action: str, params: dict) -> models.CommandLog:
@@ -116,6 +187,3 @@ async def update_command_log_status(session: AsyncSession, command_id: uuid.UUID
         await session.refresh(log_entry)
         return log_entry
     return None
-    
-# NOTE: Removed the original list_devices, add_location, get_locations_in_range, 
-# get_trajectory_geojson as the implementations were updated/replaced above or need auth checks.
