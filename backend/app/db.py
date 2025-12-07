@@ -6,12 +6,13 @@ from pydantic import BaseSettings
 
 class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://st_user:st_pass@localhost:5432/shadowtrace"
+    ECHO_SQL: bool = False
 
 settings = Settings()
 
 DATABASE_URL = settings.DATABASE_URL
 
-engine = create_async_engine(DATABASE_URL, echo=False, future=True)
+engine = create_async_engine(DATABASE_URL, echo=settings.ECHO_SQL, future=True)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 Base = declarative_base()

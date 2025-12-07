@@ -4,6 +4,8 @@ from sqlalchemy import select, text
 from . import models
 from geoalchemy2.shape import to_shape
 from shapely.geometry import mapping
+import json
+from typing import Optional
 
 async def create_user(session: AsyncSession, email: str, hashed_password: str):
     u = models.User(email=email, hashed_password=hashed_password)
@@ -16,7 +18,7 @@ async def get_user_by_email(session: AsyncSession, email: str):
     q = await session.execute(select(models.User).where(models.User.email == email))
     return q.scalar_one_or_none()
 
-async def create_device(session: AsyncSession, user_id, device_uuid: str, display_name: str | None = None):
+async def create_device(session: AsyncSession, user_id, device_uuid: str, display_name: Optional[str] = None):
     d = models.Device(user_id=user_id, device_uuid=device_uuid, display_name=display_name)
     session.add(d)
     await session.commit()
@@ -62,7 +64,7 @@ async def get_last_location(session: AsyncSession, device_id: str):
         return None
     return {"id": str(r.id), "lat": r.lat, "lon": r.lon, "accuracy": r.accuracy_m, "speed": r.speed, "recorded_at": r.recorded_at}
 
-async def get_locations_in_range(session: AsyncSession, device_id: str, start: str | None = None, end: str | None = None):
+async def get_locations(session: AsyncSession, device_id: str, start: Optional[str] = None, end: Optional[str] = None):
     sql = "SELECT id, ST_X(geom) as lon, ST_Y(geom) as lat, accuracy_m, speed, recorded_at FROM locations WHERE device_id = :device_id"
     params = {"device_id": device_id}
     if start:
@@ -76,7 +78,7 @@ async def get_locations_in_range(session: AsyncSession, device_id: str, start: s
     rows = q.fetchall()
     return [{"id": str(r.id), "lat": r.lat, "lon": r.lon, "accuracy": r.accuracy_m, "speed": r.speed, "recorded_at": r.recorded_at} for r in rows]
 
-async def get_trajectory_geojson(session: AsyncSession, device_id: str, start: str | None = None, end: str | None = None):
+async def get_trajectory_geojson(session: AsyncSession, device_id: str, start: Optional[str] = None, end: Optional[str] = None):
     sql = "SELECT ST_AsGeoJSON(ST_MakeLine(geom ORDER BY recorded_at)) as geojson FROM locations WHERE device_id = :device_id"
     params = {"device_id": device_id}
     if start:
@@ -91,3 +93,17 @@ async def get_trajectory_geojson(session: AsyncSession, device_id: str, start: s
         return None
     import json
     return json.loads(row.geojson)
+
+# Device commands
+async def create_device_command(session: AsyncSession, device_id: str, command_type: str, payload: dict):
+    stmt = text("INSERT INTO device_commands (device_id, command_type, payload) VALUES (:device_id, :command_type, :payload) RETURNING id")
+    res = await session.execute(stmt, {"device_id": device_id, "command_type": command_type, "payload": json.dumps(payload or {})})
+    cmd_id = res.scalar_one()
+    await session.commit()
+    q = await session.execute(text("SELECT id, device_id, command_type, payload, status, created_at FROM device_commands WHERE id = :id"), {"id": cmd_id})
+    r = q.first()
+    return {"id": str(r.id), "device_id": str(r.device_id), "command_type": r.command_type, "payload": r.payload, "status": r.status, "created_at": r.created_at}
+
+async def mark_command_executed(session: AsyncSession, command_id: str):
+    await session.execute(text("UPDATE device_commands SET status='executed', updated_at = now() WHERE id = :id"), {"id": command_id})
+    await session.commit()

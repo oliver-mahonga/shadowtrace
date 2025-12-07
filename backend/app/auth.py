@@ -3,7 +3,7 @@ import os
 from passlib.context import CryptContext
 from jose import jwt, JWTError
 from datetime import datetime, timedelta
-from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 
