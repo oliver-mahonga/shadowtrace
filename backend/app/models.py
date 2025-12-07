@@ -1,4 +1,8 @@
+<<<<<<< Updated upstream
 # backend/app/models.py
+=======
+#models.py
+>>>>>>> Stashed changes
 from sqlalchemy import Column, String, DateTime, JSON, Float, ForeignKey, text
 from sqlalchemy.dialects.postgresql import UUID
 from geoalchemy2 import Geometry
