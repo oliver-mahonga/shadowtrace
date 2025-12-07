@@ -1,26 +1,36 @@
 # backend/app/main.py
+
 from fastapi import FastAPI
 from .api import v1
-from .api import ws
+from .api import ws 
 from .db import engine, Base
 import logging
-import sqlalchemy
-import os
+from contextlib import asynccontextmanager
 
 logger = logging.getLogger("uvicorn.error")
-app = FastAPI(title="ShadowTrace API")
 
-app.include_router(v1.router)
-app.include_router(ws.router)
-
-@app.on_event("startup")
-async def startup():
-    # ensure Postgres extensions and create tables
+# --- Lifespan/Startup Events ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Ensure DB tables are created (development convenience)
     async with engine.begin() as conn:
-        # enable pgcrypto for gen_random_uuid
-        try:
-            await conn.execute(sqlalchemy.text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
-        except Exception as e:
-            logger.warning("Could not create pgcrypto extension: %s", e)
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("DB tables ensured and extensions installed (if possible)")
+    logger.info("DB tables ensured")
+    
+    yield # Application runs
+    
+    logger.info("Application shut down.")
+
+
+app = FastAPI(
+    title="ShadowTrace API", 
+    lifespan=lifespan 
+)
+
+# --- Include Routers ---
+app.include_router(v1.router, prefix="/api") 
+app.include_router(ws.ws_router) 
+
+@app.get("/")
+async def root():
+    return {"message": "ShadowTrace API v1 is running! Access /docs for API schema."}
