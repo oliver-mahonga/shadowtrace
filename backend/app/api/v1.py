@@ -1,145 +1,139 @@
 # backend/app/api/v1.py
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional, List
-from ..db import get_db
-from .. import crud, schemas, auth
-from pydantic import BaseModel
-import redis.asyncio as aioredis
-import os
-import json
 
-router = APIRouter(prefix="/api/v1")
-# Redis client (for action queue)
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional, List, Annotated
+from ..db import get_db
+from .. import crud, schemas, auth, models
+import json
+import uuid
+from .ws import manager # Import the WebSocket manager
+
+router = APIRouter(prefix="/v1")
 
 # --- AUTH ---
-class RegisterIn(BaseModel):
-    email: str
-    password: str
 
-class LoginIn(BaseModel):
-    email: str
-    password: str
-
-@router.post("/auth/register", response_model=dict)
-async def register(payload: RegisterIn, db: AsyncSession = Depends(get_db)):
-    existing = await crud.get_user_by_email(db, payload.email)
-    if existing:
+@router.post("/auth/register", response_model=dict, tags=["1. Authentication"])
+async def register(payload: schemas.UserRegister, db: Annotated[AsyncSession, Depends(get_db)]):
+    if await crud.get_user_by_email(db, payload.email):
         raise HTTPException(status_code=400, detail="Email already registered")
+    if await crud.get_user_by_username(db, payload.username):
+        raise HTTPException(status_code=400, detail="Username already taken")
+        
     hashed = auth.hash_password(payload.password)
-    user = await crud.create_user(db, payload.email, hashed)
-    token = auth.create_access_token(str(user.id))
-    return {"access_token": token, "token_type": "bearer"}
+    user = await crud.create_user(db, payload, hashed)
+    
+    token = auth.create_access_token(user.username)
+    return {"access_token": token, "token_type": "bearer", "user_id": str(user.id)}
 
-@router.post("/auth/login", response_model=dict)
-async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)):
-    user = await crud.get_user_by_email(db, payload.email)
+@router.post("/auth/login", response_model=dict, tags=["1. Authentication"])
+async def login(payload: schemas.UserLogin, db: Annotated[AsyncSession, Depends(get_db)]):
+    user = await crud.get_user_by_username(db, payload.username)
+    
     if not user or not auth.verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    token = auth.create_access_token(str(user.id))
-    return {"access_token": token, "token_type": "bearer"}
+        
+    token = auth.create_access_token(user.username)
+    return {"access_token": token, "token_type": "bearer", "user_id": str(user.id)}
 
-# --- DEVICE REGISTRATION & LIST ---
-@router.post("/devices/register", response_model=schemas.DeviceOut)
-async def register_device(payload: schemas.DeviceCreate, db: AsyncSession = Depends(get_db)):
-    device = await crud.create_device(db, None, payload.device_uuid, payload.display_name)
-    return schemas.DeviceOut.from_orm(device)
+@router.get("/auth/me", response_model=schemas.UserOut, tags=["1. Authentication"])
+async def read_users_me(current_user: Annotated[models.User, Depends(auth.get_current_user)]):
+    return current_user
 
-@router.get("/devices", response_model=List[schemas.DeviceOut])
-async def list_devices(db: AsyncSession = Depends(get_db)):
-    res = await db.execute("SELECT id, device_uuid, display_name, status, last_active FROM devices ORDER BY created_at DESC")
-    rows = res.fetchall()
-    out = []
-    for r in rows:
-        out.append({
-            "id": str(r.id),
-            "device_uuid": r.device_uuid,
-            "display_name": r.display_name,
-            "status": r.status,
-            "last_active": r.last_active
-        })
-    return out
+# --- DEVICE REGISTRATION & LIST (SECURED) ---
+device_router = APIRouter(prefix="/devices", tags=["2. Device Management"], dependencies=[Depends(auth.get_current_user)])
 
-# --- LOCATION ENDPOINTS ---
-@router.post("/devices/{device_id}/locations")
-async def post_location(device_id: str, payload: schemas.LocationPayload, db: AsyncSession = Depends(get_db)):
-    # Support device_uuid or DB id
-    device = await crud.get_device_by_uuid(db, device_id)
-    if not device:
-        q = await db.execute("SELECT id FROM devices WHERE id = :id", {"id": device_id})
-        if not q.first():
-            raise HTTPException(status_code=404, detail="Device not found")
-    rec = await crud.add_location(db, device_id, payload.lat, payload.lon, payload.accuracy, payload.speed, payload.bearing, payload.recorded_at)
-    # update last_active
-    await db.execute("UPDATE devices SET last_active = now() WHERE device_uuid = :uuid OR id = :id", {"uuid": device_id, "id": device_id})
-    await db.commit()
-    # optionally push to redis/pubsub for realtime consumers
-    return {"ok": True, "location": rec}
+@device_router.post("/register", response_model=schemas.DeviceOut)
+async def register_device(
+    payload: schemas.DeviceCreate, 
+    current_user: Annotated[models.User, Depends(auth.get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
+):
+    unique_device_id = payload.unique_device_id
+    
+    existing = await crud.get_device_by_unique_id(db, unique_device_id)
+    if existing:
+         raise HTTPException(status_code=400, detail="Device with this ID is already registered.")
 
-@router.get("/devices/{device_id}/last_location")
-async def last_location(device_id: str, db: AsyncSession = Depends(get_db)):
+    device = await crud.create_device(db, current_user.id, unique_device_id, payload.display_name)
+    return schemas.DeviceOut.model_validate(device)
+
+@device_router.get("/", response_model=List[schemas.DeviceOut])
+async def list_devices(
+    current_user: Annotated[models.User, Depends(auth.get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
+):
+    devices = await crud.list_devices_by_user(db, current_user.id)
+    return [schemas.DeviceOut.model_validate(d) for d in devices]
+
+# --- LOCATION ENDPOINTS (SECURED VIEWING) ---
+location_router = APIRouter(prefix="/locations", tags=["3. Tracking & Location"], dependencies=[Depends(auth.get_current_user)])
+
+@location_router.get("/{device_id}/last", response_model=dict)
+async def last_location(
+    device_id: uuid.UUID, 
+    current_user: Annotated[models.User, Depends(auth.get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
+):
+    # Check ownership
+    if not await crud.get_device_by_id_and_owner(db, device_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Device not found or unauthorized.")
+        
     last = await crud.get_last_location(db, device_id)
+    if not last:
+        raise HTTPException(status_code=404, detail="No location history found.")
+        
     return {"location": last}
 
-@router.get("/devices/{device_id}/locations")
-async def locations(device_id: str, start: Optional[str] = None, end: Optional[str] = None, db: AsyncSession = Depends(get_db)):
-    items = await crud.get_locations(db, device_id, start, end)
-    return {"items": items}
+# --- LOCATION REPORTING (DEVICE-ONLY) ---
 
-@router.get("/devices/{device_id}/trajectory")
-async def trajectory(device_id: str, start: Optional[str] = None, end: Optional[str] = None, db: AsyncSession = Depends(get_db)):
-    geo = await crud.get_trajectory_geojson(db, device_id, start, end)
-    return {"geojson": geo}
+@router.post("/device_report/location", tags=["Device-Only Reporting"])
+async def post_device_location(payload: schemas.LocationPayload, unique_device_id: str, db: Annotated[AsyncSession, Depends(get_db)]):
+    device = await crud.get_device_by_unique_id(db, unique_device_id)
+    if not device:
+        raise HTTPException(status_code=403, detail="Device not recognized.")
+        
+    rec = await crud.add_location(db, device.id, payload.lat, payload.lon, payload.accuracy, payload.speed, payload.bearing, payload.recorded_at)
+    return {"ok": True, "location": rec}
 
-# --- ACTIONS (REMOTE CONTROL) ---
-class ActionIn(BaseModel):
-    action: str
-    params: Optional[dict] = {}
 
-@router.post("/devices/{device_id}/action")
-async def device_action(device_id: str, payload: ActionIn, db: AsyncSession = Depends(get_db)):
-    # Insert command record
-    cmd = await crud.create_device_command(db, device_id, payload.action, payload.params)
-    # push to redis queue for device to pick up
-    queue_key = f"device:{device_id}:actions"
-    await redis_client.rpush(queue_key, json.dumps({"command_id": cmd["id"], "action": payload.action, "params": payload.params}))
-    return {"status": "queued", "device": device_id, "action": payload.action, "command_id": cmd["id"]}
+# --- ACTIONS (REMOTE CONTROL - SECURED) ---
+action_router = APIRouter(prefix="/actions", tags=["4. Remote Control"], dependencies=[Depends(auth.get_current_user)])
 
-@router.get("/devices/{device_id}/actions/next")
-async def poll_actions(device_id: str):
-    queue_key = f"device:{device_id}:actions"
-    data = await redis_client.lpop(queue_key)
-    if not data:
-        return {"action": None}
-    return {"action": json.loads(data)}
+@action_router.post("/{device_id}")
+async def send_device_action(
+    device_id: uuid.UUID, 
+    payload: schemas.CommandCreate, 
+    current_user: Annotated[models.User, Depends(auth.get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
+):
+    # 1. Check ownership
+    device = await crud.get_device_by_id_and_owner(db, device_id, current_user.id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found or unauthorized.")
+        
+    # 2. Log event/command into the database (PENDING status)
+    command_log = await crud.log_command(db, device_id, payload.action, payload.params)
+    
+    # 3. Prepare the command for the device
+    command_data = {
+        "command_id": str(command_log.id),
+        "action": payload.action,
+        "params": payload.params
+    }
+    command_json = json.dumps(command_data)
+    
+    # 4. Attempt real-time delivery via WebSocket, otherwise queue in Redis
+    is_sent = await manager.send_command_to_device(device.unique_device_id, command_json)
+    
+    return {
+        "status": "SENT" if is_sent else "QUEUED", 
+        "command_id": str(command_log.id), 
+        "device": str(device_id), 
+        "action": payload.action
+    }
 
-# Device posts command response (file uploads or JSON)
-@router.post("/devices/{device_id}/action/{command_id}/response")
-async def action_response(device_id: str, command_id: str, response_type: str = "ack", file: Optional[UploadFile] = File(None), db: AsyncSession = Depends(get_db)):
-    payload = {}
-    if file:
-        contents = await file.read()
-        path = f"uploads/{device_id}_{command_id}_{file.filename}"
-        with open(path, "wb") as f:
-            f.write(contents)
-        payload["file_path"] = path
-        payload["media_type"] = file.content_type
-    # insert response
-    stmt = "INSERT INTO device_responses (command_id, response_type, payload) VALUES (:command_id, :response_type, :payload)"
-    await db.execute(text(stmt), {"command_id": command_id, "response_type": response_type, "payload": json.dumps(payload)})
-    await crud.mark_command_executed(db, command_id)
-    return {"ok": True}
-
-# --- EVIDENCE UPLOAD ---
-@router.post("/devices/{device_id}/evidence")
-async def upload_evidence(device_id: str, file: UploadFile = File(...), recorded_at: Optional[str] = None, db: AsyncSession = Depends(get_db)):
-    contents = await file.read()
-    path = f"uploads/{device_id}_{file.filename}"
-    with open(path, "wb") as f:
-        f.write(contents)
-    stmt = "INSERT INTO evidence (device_id, recorded_at, media_type, s3_path) VALUES (:device_id, coalesce(:recorded_at, now()), :media_type, :path)"
-    await db.execute(text(stmt), {"device_id": device_id, "recorded_at": recorded_at, "media_type": file.content_type, "path": path})
-    await db.commit()
-    return {"status": "stored", "path": path}
+# --- Register all sub-routers to the V1 Router ---
+router.include_router(device_router)
+router.include_router(location_router)
+router.include_router(action_router)
