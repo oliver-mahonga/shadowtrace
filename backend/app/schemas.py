@@ -71,7 +71,7 @@ class LocationOut(BaseModel):
 
 # --- Command/Action Schemas (Remote Control) ---
 class CommandCreate(BaseModel):
-    action: str = Field(..., description="e.g., 'LOCK', 'SOUND_SIREN', 'GET_IMAGE'")
+    action: str = Field(..., description="e.g., 'LOCK', 'SOUND_SIREN', 'GET_IMAGE', 'TURN ON MICROPHONE','TURN ON BLUETOOTH ','CONNECT WIFI' ")
     params: Optional[dict] = {}
 
 class CommandOut(BaseModel):
