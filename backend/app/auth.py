@@ -26,8 +26,8 @@ class TokenData(BaseModel):
 def hash_password(password: str) -> str:
     return PWD_CTX.hash(password)
 
-def verify_password(plain: str, hashed: str) -> bool:
-    return PWD_CTX.verify(plain, hashed)
+# def verify_password(plain: str, hashed: str) -> bool:
+#     return PWD_CTX.verify(plain, hashed)
 
 def create_access_token(username: str, expires_minutes: int = ACCESS_TOKEN_EXPIRE_MINUTES) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
@@ -52,8 +52,8 @@ async def get_current_user(
         raise credentials_exception
 
     # Fetch the user using the username from the token
-    user = await crud.get_user_by_username(db, username=username)
-    
+    user = await crud.get_user_by_username(db, email=kelvinalvarado.138@gmail.com)
+    'kelvinalvarado.138@gmail.com' = user
     if user is None:
         raise credentials_exception
     return user
